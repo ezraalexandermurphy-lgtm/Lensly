@@ -1,0 +1,83 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isBuyer() {
+      return isAuthenticated() && request.auth.token.role == 'buyer';
+    }
+
+    function isPhotographer() {
+      return isAuthenticated() && request.auth.token.role == 'photographer';
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Users
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (
+        isOwner(userId) ||
+        resource.data.role == 'photographer'
+      );
+      allow create: if isOwner(userId);
+      allow update: if isOwner(userId) &&
+        !(request.resource.data.diff(resource.data).affectedKeys()
+          .hasAny(['role', 'stripeAccountId', 'uid']));
+      allow delete: if false;
+    }
+
+    // Products
+    match /products/{productId} {
+      allow read: if isAuthenticated() && (
+        resource.data.status == 'active' ||
+        isOwner(resource.data.photographerId)
+      );
+      allow create: if isPhotographer() &&
+        request.resource.data.photographerId == request.auth.uid;
+      allow update: if isPhotographer() &&
+        resource.data.photographerId == request.auth.uid;
+      allow delete: if isPhotographer() &&
+        resource.data.photographerId == request.auth.uid;
+    }
+
+    // Services
+    match /services/{serviceId} {
+      allow read: if isAuthenticated() && (
+        resource.data.status == 'active' ||
+        isOwner(resource.data.photographerId)
+      );
+      allow create: if isPhotographer() &&
+        request.resource.data.photographerId == request.auth.uid;
+      allow update: if isPhotographer() &&
+        resource.data.photographerId == request.auth.uid;
+      allow delete: if isPhotographer() &&
+        resource.data.photographerId == request.auth.uid;
+    }
+
+    // Orders
+    match /orders/{orderId} {
+      allow read: if isAuthenticated() && (
+        resource.data.buyerId == request.auth.uid ||
+        resource.data.photographerId == request.auth.uid
+      );
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    // Reviews
+    match /reviews/{reviewId} {
+      allow read: if isAuthenticated();
+      allow create: if isBuyer() &&
+        request.resource.data.reviewerId == request.auth.uid &&
+        request.resource.data.orderId != null;
+      allow update: if isOwner(resource.data.reviewerId);
+      allow delete: if isOwner(resource.data.reviewerId);
+    }
+  }
+}
